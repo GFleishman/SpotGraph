@@ -66,11 +66,13 @@ def extract_neighborhoods_distributed(
     spots : string
         The filepath to the spots data on disk
     segments : ndarray (e.g. zarr.Array)
-        See ``extract_neighborhoods``
+        3D image of cell or nuclei segments
     radius : int
-        See ``extract_neighborhoods``
+        Neighborhood of ``radius`` voxels in each direction
+        centered on every spot is extracted
     ratio : tuple length 3
-        See ``extract_neighborhoods``
+        Each spot coordinate is divided by ``ratio`` to determine
+        the neighborhood center in ``segments``
     nblocks : int
         The number of parallel blocks to process
     cluster_kwargs : dict

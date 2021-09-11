@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.spatial import cKDTree
+from scipy.sparse import dok_matrix
 
 
 def cells_per_neighborhood(neighborhood_matrix):
@@ -30,27 +31,35 @@ def cells_per_neighborhood(neighborhood_matrix):
     return counts
 
 
-def distances(neighborhood_matrix):
+def distances(neighborhood_matrix, kernel=None, kernel_kwargs={}, normalize=False):
     """
     Compute distance to all cells within the neighborhood
 
     Parameters
     ----------
-    neighborhood_matrix : NxM array
+    neighborhood_matrix : Nx3 array
         The array returned by ``extract_neighborhoods``
+    kernel : callable
+        Function to apply to distance, default None
+    kernel_kwargs : dict
+        Any arguments to kernel function
+    normalize : bool
+        Normalize the distribution of distances for each node
 
     Returns
     -------
-    distances : list
-        list of list of tuples; For each spot there is a list
-        of tuples. Each tuple is a segment ID and the distance
-        of the spot to that segment ID.
+    distances : scipy.sparse.dok_matrix
+        NxM sparse matrix; key (i, j) is the distance from
+        spot i to cell j; if cell j is not in the neighborhood
+        of spot i then the distance is 0.
     """
 
     # initialize container
-    distances = []
+    nspots = neighborhood_matrix.shape[0]
+    ncells = neighborhood_matrix[:, 3:].max() + 1
+    distances = dok_matrix((nspots, ncells), dtype=float)
 
-    # get edge size and center coordinate array
+    # get edge size and center coordinate
     edge = int(round(np.cbrt(len(neighborhood_matrix[0, 3:]))))
     center = np.array([ (edge-1)/2, ]*3)[None, :]
 
@@ -60,28 +69,31 @@ def distances(neighborhood_matrix):
         # reformat neighborhood and get unique labels
         neighborhood = neighborhood[3:].reshape((edge,)*3)
         unique = np.unique(neighborhood)
-        unique = [x for x in unique if x != 0]
-        
-        # initialize container
+        unique = [x for x in unique if x != 0]  # 0 is background
+
+        # initialize local container
         dists = np.empty(len(unique), dtype=float)
 
         # loop over unique labels
         for jjj, label in enumerate(unique):
             coords = np.column_stack(np.nonzero(neighborhood == label))
-            dists[jjj] = cdist(center, coords).squeeze().min()
+            d = cdist(center, coords).squeeze().min()
+            if d == 0: d = 1e-20  # distinguish from dok_matrix fill value
+            if kernel: d = kernel(d, **kernel_kwargs)
+            dists[jjj] = d
 
-        # sort
-        inds = np.argsort(dists)
-        unique, dists = np.array(unique)[inds], np.array(dists)[inds]
+        # normalize
+        if normalize: dists = dists / np.sum(dists)
 
-        # package and append
-        distances.append(zip(unique, dists))
+        # put in sprase matrix
+        for label, d in zip(unique, dists):
+            distances[iii, label] = d
 
     # final return
     return distances
 
 
-def nearest_neighbors(spots, max_distance):
+def nearest_neighbors(spots, max_distance, distance_to_self=1e-20):
     """
     Get all spot pairs that are less than a given distance apart
 
@@ -94,11 +106,32 @@ def nearest_neighbors(spots, max_distance):
 
     Returns
     -------
-    pairs : dict
+    pairs : scipy.sparse.dok_matrix
         key (i, j) gives distances between points i and j
     """
 
     # put spots into KDTree, compute distances within threshold
     tree = cKDTree(spots)
-    return tree.sparse_distance_matrix(tree, max_distance, output_type='dict')
+    dok = tree.sparse_distance_matrix(tree, max_distance)
+    dok.setdiag(distance_to_self)  # to distinguish from fill value
+    return dok
+
+
+def exponential_kernel(distance, sigma):
+    """
+    Evaluate e^(-``distance`` / ``sigma``)
+
+    Parameters
+    ----------
+    distance : float
+        Positive scalar value
+    sigma : float
+        Standard deviation of kernel
+
+    Returns
+    -------
+    exponentiated distance value e^(-``distance`` / ``sigma``)
+    """
+
+    return np.exp(-distance / sigma)
 
