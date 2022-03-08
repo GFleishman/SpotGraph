@@ -1,6 +1,6 @@
 import numpy as np
 import networkx as nx
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, lil_matrix
 from SpotGraph.simple_metrics import nearest_neighbors
 from SpotGraph.simple_metrics import exponential_kernel
 
@@ -34,25 +34,26 @@ def spot_to_spot_neighbors_graph(
         of all nodes sums to 1.
     """
 
-    # TODO: experiment with faster methods? don't use .toarray()
+    # get distances
+    dists = nearest_neighbors(spots, max_distance).tocsr()
+
+    # apply kernel
+    if kernel is not None:
+        a, b, c = dists.indices, dists.indptr, dists.shape
+        data = kernel(dists.data, **kernel_kwargs)
+        dists = csr_matrix((data, a, b), shape=c)
 
     # initialize graph with spot indices as nodes
     DG = nx.DiGraph()
     DG.add_nodes_from(range(len(spots)))
 
-    # get distances
-    dists = nearest_neighbors(spots, max_distance).tocsr()
-
     # add weighted edges to graph
     for iii in range(len(spots)):
-        weights = dists.getrow(iii).toarray().squeeze()
-        neighbors = np.nonzero(weights)[0]
-        if kernel:
-            weights = kernel(weights[neighbors], **kernel_kwargs)
-        else:
-            weights = weights[neighbors]
+        weights = dists.getrow(iii)
         weights = weights / np.sum(weights)
-        edges = zip((iii,)*len(neighbors), neighbors, weights)
+        indices = weights.indices
+        weights = weights.data
+        edges = zip((iii,)*len(indices), indices, weights)
         DG.add_weighted_edges_from(edges)
 
     # return graph
@@ -89,22 +90,17 @@ def smooth_distances_with_graph(
     distances_csr = distances.tocsr()
 
     # initialize container
-    smooth_distances = csr_matrix(distances.shape, dtype=distances.dtype)
+    smooth_distances = lil_matrix(distances.shape, dtype=distances.dtype)
 
-    # loop over all spots
+    # loop over all spots, weight-sum rows
     for iii in range(len(graph)):
-
-        # initialize container for row
-        smooth_row = np.zeros(distances.shape[1], dtype=float)
-
-        # loop over all neighbor spots
-        for jjj, weight in graph.adj[iii].items():
-            w = weight['weight']
-            row = distances_csr.getrow(jjj).toarray().squeeze()
-            smooth_row += w * row
-
-        # set row
-        smooth_distances[iii] = csr_matrix(smooth_row)
+        smooth_row = None
+        for jjj, edge in graph.adj[iii].items():
+            if smooth_row is None:
+                smooth_row = edge['weight'] * distances_csr.getrow(jjj)
+            else:
+                smooth_row += edge['weight'] * distances_csr.getrow(jjj)
+        smooth_distances[iii] = smooth_row.tolil()
 
     # return
     return smooth_distances.todok()

@@ -24,20 +24,27 @@ def cells_per_neighborhood(neighborhood_matrix):
 
     # loop over all neighborhoods
     for iii, neighborhood in enumerate(neighborhood_matrix):
-        unique = np.unique(neighborhood[3:])
+        unique = np.unique(neighborhood)
         counts[iii]= len(unique)-1 if 0. in unique else len(unique)
 
     # return
     return counts
 
 
-def distances(neighborhood_matrix, kernel=None, kernel_kwargs={}, normalize=False):
+def spot_to_cell_distances(
+    neighborhood_matrix,
+    neighborhood_shape,
+    spacing,
+    kernel=None,
+    kernel_kwargs={},
+    normalize=False,
+):
     """
     Compute distance to all cells within the neighborhood
 
     Parameters
     ----------
-    neighborhood_matrix : Nx3 array
+    neighborhood_matrix : NxM array
         The array returned by ``extract_neighborhoods``
     kernel : callable
         Function to apply to distance, default None
@@ -56,18 +63,18 @@ def distances(neighborhood_matrix, kernel=None, kernel_kwargs={}, normalize=Fals
 
     # initialize container
     nspots = neighborhood_matrix.shape[0]
-    ncells = neighborhood_matrix[:, 3:].max() + 1
+    ncells = neighborhood_matrix.max() + 1
     distances = dok_matrix((nspots, ncells), dtype=float)
 
-    # get edge size and center coordinate
-    edge = int(round(np.cbrt(len(neighborhood_matrix[0, 3:]))))
-    center = np.array([ (edge-1)/2, ]*3)[None, :]
+    # get center voxel coordinate in physical units
+    center = np.array( [(x-1)/2 for x in neighborhood_shape] )
+    center = (center * spacing).reshape((1, 3))
 
     # loop over all neighborhoods
     for iii, neighborhood in enumerate(neighborhood_matrix):
 
         # reformat neighborhood and get unique labels
-        neighborhood = neighborhood[3:].reshape((edge,)*3)
+        neighborhood = neighborhood.reshape(neighborhood_shape)
         unique = np.unique(neighborhood)
         unique = [x for x in unique if x != 0]  # 0 is background
 
@@ -77,6 +84,7 @@ def distances(neighborhood_matrix, kernel=None, kernel_kwargs={}, normalize=Fals
         # loop over unique labels
         for jjj, label in enumerate(unique):
             coords = np.column_stack(np.nonzero(neighborhood == label))
+            coords = coords * spacing
             d = cdist(center, coords).squeeze().min()
             if d == 0: d = 1e-20  # distinguish from dok_matrix fill value
             if kernel: d = kernel(d, **kernel_kwargs)
@@ -85,7 +93,7 @@ def distances(neighborhood_matrix, kernel=None, kernel_kwargs={}, normalize=Fals
         # normalize
         if normalize: dists = dists / np.sum(dists)
 
-        # put in sprase matrix
+        # put in sparse matrix
         for label, d in zip(unique, dists):
             distances[iii, label] = d
 
