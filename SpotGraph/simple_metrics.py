@@ -87,6 +87,7 @@ def spot_to_cell_distances(
             coords = coords * spacing
             d = cdist(center, coords).squeeze().min()
             if d == 0: d = 1e-20  # distinguish from dok_matrix fill value
+            # explicit zeros are not consistently implemented
             if kernel: d = kernel(d, **kernel_kwargs)
             dists[jjj] = d
 
