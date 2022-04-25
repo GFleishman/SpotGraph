@@ -3,6 +3,7 @@ import numpy as np
 
 def hard_assign(
     metric_dok,
+    spot_counts=None,
     min_or_max='min',
     threshold=None,
     return_assignments=True,
@@ -60,6 +61,10 @@ def hard_assign(
     assignments = np.zeros(nspots, dtype=np.uint32)
     counts = np.zeros(nsegments, dtype=np.uint32)
 
+    # create a spot_counts array
+    if spot_counts is None:
+        spot_counts = np.ones(nspots, dtype=np.uint8)
+
     # loop over spots, assign
     for iii in range(nspots):
 
@@ -79,7 +84,7 @@ def hard_assign(
             # check threshold and assign
             if ggg(dist):
                 assignments[iii] = segment_id
-                counts[segment_id] += 1
+                counts[segment_id] += spot_counts[iii]
 
     # return counts
     if return_assignments:
@@ -127,4 +132,35 @@ def soft_assign(metric_dok):
     # return
     return counts
 
+
+def random_assign(metric_dok, nsamples, return_assignments=True):
+    """
+    """
+
+    # convert format
+    metric_csr = metric_dok.tocsr()
+
+    # number of spots and segments
+    nspots = metric_csr.shape[0]
+    nsegments = metric_csr.shape[1]
+
+    # container for results
+    assignments = np.zeros((nspots, nsamples), dtype=np.uint32)
+    counts = np.zeros((nsegments, nsamples), dtype=np.uint32)
+
+    # loop over spots, random assign
+    for iii in range(nspots):
+
+        # get indices
+        options = metric_csr.getrow(iii).indices
+        if len(options) > 0:
+            selected = options[np.random.randint(len(options), size=nsamples)]
+            assignments[iii] = selected
+            counts[selected, range(nsamples)] += 1
+
+    # return counts
+    if return_assignments:
+        return counts, assignments
+    else:
+        return counts
 
